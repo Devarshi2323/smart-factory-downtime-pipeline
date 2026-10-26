@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import paho.mqtt.client as mqtt
@@ -24,6 +25,9 @@ class InvalidMessage(ValueError):
 
 
 def connection_string() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url
     return (
         f"host={os.getenv('DB_HOST', 'localhost')} "
         f"port={os.getenv('DB_PORT', '5432')} "
@@ -199,7 +203,16 @@ def main():
     client.on_message = on_message
     client.on_disconnect = on_disconnect
     client.reconnect_delay_set(min_delay=1, max_delay=30)
-    client.connect(os.getenv("MQTT_HOST", "localhost"), int(os.getenv("MQTT_PORT", "1883")), keepalive=60)
+    host, port = os.getenv("MQTT_HOST", "localhost"), int(os.getenv("MQTT_PORT", "1883"))
+    for attempt in range(1, 21):
+        try:
+            client.connect(host, port, keepalive=60)
+            break
+        except OSError:
+            log.warning("MQTT broker %s:%s not reachable (attempt %d/20)", host, port, attempt)
+            time.sleep(3)
+    else:
+        raise SystemExit("Could not connect to the MQTT broker")
 
     try:
         client.loop_forever()

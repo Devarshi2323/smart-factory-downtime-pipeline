@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Line 3 Live Dashboard</title>
+<meta name="description" content="Live OEE and downtime dashboard for a simulated engine assembly line. MQTT, PostgreSQL and Python pipeline by Devarshi Patel.">
+<style>
+  :root{--page:#eceae5;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--mut:#898781;--grid:#e1e0d9;--base:#c3c2b7;--line:#f0efec;
+        --s1:#2a78d6;--s2:#eb6834;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--neutral:#898781;
+        --live-bg:#e7f6e7;--off-bg:#f5f4f0;--hover:#f3f7fd;--tip-bg:#0b0b0b;--tip-ink:#ffffff;color-scheme:light}
+  :root[data-theme="dark"]{--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--mut:#898781;--grid:#2c2c2a;--base:#383835;--line:#262624;
+        --s1:#3987e5;--s2:#d95926;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--neutral:#6d6c66;
+        --live-bg:#0f2a0f;--off-bg:#232321;--hover:#1f2a38;--tip-bg:#f0efec;--tip-ink:#0b0b0b;color-scheme:dark}
+  .theme{font:inherit;font-size:12px;background:var(--surface);color:var(--ink2);border:1px solid var(--grid);border-radius:999px;padding:3px 10px;cursor:pointer}
+  .theme:hover{color:var(--ink)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);font-family:"Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink)}
+  .page{max-width:1500px;margin:0 auto;padding:16px}
+  header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:flex-end;margin-bottom:12px}
+  h1{font-size:22px;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .sub{font-size:13px;color:var(--ink2);margin-top:3px}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:999px;padding:3px 10px;border:1px solid}
+  .badge i{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .badge.live{background:var(--live-bg);border-color:var(--good)}.badge.live i{background:var(--good);animation:pulse 1.6s infinite}
+  .badge.off{background:var(--off-bg);border-color:var(--base);color:var(--ink2)}.badge.off i{background:var(--neutral)}
+  .badge.sim{border-color:var(--base);color:var(--ink2);font-weight:500}
+  @keyframes pulse{50%{opacity:.35}}
+  .filters{display:flex;gap:8px;flex-wrap:wrap}
+  .filters label{font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+  select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--grid);border-radius:6px;background:var(--surface);color:var(--ink);min-width:130px}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:10px}
+  .card{background:var(--surface);border:1px solid var(--grid);border-radius:8px;padding:12px 14px;min-width:0}
+  .kpi{text-align:center}.kpi .l{font-size:12px;color:var(--ink2)}.kpi .v{font-size:28px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+  .kpi .d{font-size:11.5px;color:var(--mut);margin-top:2px}
+  .grid{display:grid;grid-template-columns:1fr 1.4fr 1.05fr;gap:10px}
+  .wide{grid-column:span 2}
+  h3{margin:0 0 2px;font-size:14px}.cs{font-size:11.5px;color:var(--mut);margin-bottom:8px}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--ink2);margin-bottom:4px}
+  .legend i{display:inline-block;width:12px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  .legend i.sq{height:10px;width:10px}
+  svg{display:block;width:100%;overflow:visible}
+  svg text{font-family:inherit}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-weight:600;color:var(--ink2);font-size:12px;padding:6px 6px;border-bottom:1px solid var(--base)}
+  td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;color:#fff;white-space:nowrap}
+  .pill.RUNNING{background:var(--good)}.pill.FAULTED{background:var(--crit)}.pill.STARVED,.pill.BLOCKED{background:var(--warn);color:#0b0b0b}.pill.STOPPED{background:var(--neutral)}
+  .feed{list-style:none;margin:0;padding:0;font-size:12.5px}
+  .feed li{display:grid;grid-template-columns:72px 46px 92px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);align-items:center}
+  .feed .t{color:var(--mut);font-family:Consolas,monospace}.feed .st{font-weight:600}
+  .tag{font-size:11px;font-weight:600;border-radius:4px;padding:1px 6px;color:#fff;width:fit-content}
+  .tag.CYCLE{background:var(--neutral)}.tag.RUNNING{background:var(--good)}.tag.FAULTED{background:var(--crit)}
+  .tag.STARVED,.tag.BLOCKED{background:var(--warn);color:#0b0b0b}.tag.STOPPED{background:var(--neutral)}
+  .about p{font-size:13px;color:var(--ink2);line-height:1.5;margin:4px 0 10px}
+  .about a{display:block;font-size:13px;color:var(--s1);text-decoration:none;border:1px solid var(--grid);border-radius:6px;padding:7px 10px;margin-bottom:6px}
+  .about a:hover{background:var(--hover)}
+  .stack{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .stack span{font-size:11.5px;border:1px solid var(--grid);border-radius:5px;padding:2px 7px;color:var(--ink2)}
+  .note{font-size:11.5px;color:var(--mut);margin-top:6px}
+  footer{font-size:12px;color:var(--mut);text-align:center;padding:12px 0 4px}
+  .tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);font-size:12px;padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .1s;z-index:10;white-space:nowrap}
+  @media (max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr 1fr}.wide{grid-column:span 2}}
+  @media (max-width:700px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.wide{grid-column:span 1}.kpi .v{font-size:22px}.feed li{grid-template-columns:62px 40px 78px 1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <h1>Line 3 Engine Assembly — Downtime &amp; OEE
+        <span id="liveBadge" class="badge off"><i></i><span>Connecting…</span></span>
+        <span class="badge sim">Simulated data</span>
+        <button class="theme" id="themeBtn" type="button">☀ Light</button></h1>
+      <div class="sub">Auto-refreshes every 10 seconds · <span id="updated">loading…</span> · Devarshi Patel</div>
+    </div>
+    <div class="filters">
+      <label>Date range<select id="days"><option value="1">Last 24 hours</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option></select></label>
+      <label>Shift<select id="shift"><option value="">All shifts</option><option>Day</option><option>Afternoon</option><option>Night</option></select></label>
+      <label>Station<select id="station"><option value="">All stations</option><option>OP10</option><option>OP20</option><option>OP30</option><option>OP40</option><option>OP50</option></select></label>
+    </div>
+  </header>
+
+  <section class="kpis">
+    <div class="card kpi"><div class="l">OEE</div><div class="v" id="k-oee">–</div><div class="d">Target 85%</div></div>
+    <div class="card kpi"><div class="l">Availability</div><div class="v" id="k-av">–</div><div class="d">Run time ÷ planned time</div></div>
+    <div class="card kpi"><div class="l">Performance</div><div class="v" id="k-pf">–</div><div class="d">Ideal vs actual cycle</div></div>
+    <div class="card kpi"><div class="l">Quality</div><div class="v" id="k-q">–</div><div class="d">Good ÷ total parts</div></div>
+    <div class="card kpi"><div class="l">Station downtime (all 5)</div><div class="v" id="k-dt">–</div><div class="d" id="k-dt-d">–</div></div>
+    <div class="card kpi"><div class="l">Engines completed</div><div class="v" id="k-en">–</div><div class="d" id="k-en-d">–</div></div>
+  </section>
+
+  <section class="grid">
+    <div class="card"><h3>Downtime by station</h3><div class="cs">Minutes, unplanned</div><svg id="c-station" height="240"></svg></div>
+    <div class="card"><h3>Fault Pareto — top causes of downtime</h3><div class="cs">Root causes only (starved/blocked and planned stops excluded)</div>
+      <div class="legend"><span><i class="sq" style="background:var(--s1)"></i>% of downtime</span><span><i style="background:var(--s2)"></i>Cumulative %</span></div>
+      <svg id="c-pareto" height="245"></svg></div>
+    <div class="card"><h3>Live station status</h3><div class="cs">Current state from the latest MQTT event</div>
+      <table><thead><tr><th>Station</th><th>Name</th><th>Status</th><th>Fault</th><th style="text-align:right">Min</th></tr></thead><tbody id="status"></tbody></table></div>
+
+    <div class="card wide"><h3>OEE trend by day</h3><div class="cs">Daily OEE vs 85% target</div><svg id="c-trend" height="200"></svg></div>
+    <div class="card"><h3>Downtime by shift</h3><div class="cs">Minutes, unplanned</div><svg id="c-shift" height="200"></svg></div>
+
+    <div class="card wide"><h3>Live event feed</h3><div class="cs">Latest machine events received over MQTT</div><ul class="feed" id="feed"></ul></div>
+    <div class="card about"><h3>About this project</h3>
+      <p>A smart-factory data pipeline. A Python simulator acts like PLCs on a 5-station line and publishes events over MQTT. A collector validates them and stores them in PostgreSQL, and this page calculates OEE and downtime live.</p>
+      <a href="https://github.com/Devarshi2323/smart-factory-downtime-pipeline" target="_blank" rel="noopener">Source code and architecture on GitHub →</a>
+      <a href="https://devarshi-patel.vercel.app/" target="_blank" rel="noopener">Portfolio →</a>
+      <div class="stack"><span>Python</span><span>MQTT</span><span>PostgreSQL</span><span>SQL views</span><span>FastAPI</span><span>Docker</span><span>Railway</span><span>pytest</span><span>Power BI</span></div>
+      <div class="note">Shift filter applies to downtime charts. OEE is calculated per production day.</div>
+    </div>
+  </section>
+  <footer>All data is simulated · 5 stations · running 24/7</footer>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const C = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const tip = document.getElementById("tip");
+const pct = v => v == null ? "–" : (v * 100).toFixed(1) + "%";
+const num = v => v == null ? "–" : Math.round(v).toLocaleString("en-CA");
+const hm = m => { m = Math.round(m || 0); return Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m"; };
+const timeOf = iso => new Date(iso).toLocaleTimeString("en-CA", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "America/Toronto"});
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+function text(parent, x, y, s, attrs = {}) {
+  const t = el("text", Object.assign({x, y, "font-size": 12, fill: C("--ink2")}, attrs), parent);
+  t.textContent = s;
+  return t;
+}
+function hover(node, label) {
+  node.style.cursor = "default";
+  node.addEventListener("mousemove", e => { tip.textContent = label; tip.style.left = (e.clientX + 12) + "px"; tip.style.top = (e.clientY - 28) + "px"; tip.style.opacity = 1; });
+  node.addEventListener("mouseleave", () => tip.style.opacity = 0);
+}
+function hbar(p, x, y, w, h, fill) { const r = Math.min(4, w); return el("path", {d: `M${x},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} H${x} Z`, fill}, p); }
+function vbar(p, x, y, w, h, fill) { const r = Math.min(4, h); return el("path", {d: `M${x},${y + h} V${y + r} Q${x},${y} ${x + r},${y} H${x + w - r} Q${x + w},${y} ${x + w},${y + r} V${y + h} Z`, fill}, p); }
+function reset(id) { const s = document.getElementById(id); s.innerHTML = ""; return s; }
+function empty(s, msg = "No data for this filter") { text(s, s.clientWidth / 2, 110, msg, {"text-anchor": "middle", fill: C("--mut")}); }
+function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); return Math.ceil(v / p) * p; }
+
+function drawStation(rows) {
+  const s = reset("c-station"), W = s.clientWidth;
+  if (!rows.length) return empty(s);
+  const L = 120, R = 58, bh = 24, gap = 18, max = niceMax(Math.max(...rows.map(r => r.minutes)));
+  rows.forEach((r, i) => {
+    const y = 6 + i * (bh + gap), w = Math.max(2, (W - L - R) * r.minutes / max);
+    text(s, L - 8, y + bh / 2 + 4, r.station_name, {"text-anchor": "end", fill: C("--ink")});
+    hover(hbar(s, L, y, w, bh, C("--s1")), `${r.station_id} ${r.station_name}: ${num(r.minutes)} min`);
+    text(s, L + w + 6, y + bh / 2 + 4, num(r.minutes), {fill: C("--ink")});
+  });
+  el("line", {x1: L, x2: L, y1: 0, y2: rows.length * (bh + gap), stroke: C("--base")}, s);
+}
+
+function drawPareto(rows) {
+  const s = reset("c-pareto"), W = s.clientWidth, H = 245;
+  if (!rows.length) return empty(s);
+  rows = rows.slice(0, 10);
+  const L = 40, R = 8, T = 8, rotate = (W - L - R) / rows.length < 78, B = rotate ? 62 : 44, ih = H - T - B, iw = W - L - R, bw = iw / rows.length;
+  [0, 25, 50, 75, 100].forEach(v => { const y = T + ih * (1 - v / 100); el("line", {x1: L, x2: W - R, y1: y, y2: y, stroke: v ? C("--grid") : C("--base")}, s); text(s, L - 6, y + 4, v + "%", {"text-anchor": "end", fill: C("--mut"), "font-size": 11}); });
+  const pts = [];
+  rows.forEach((r, i) => {
+    const x = L + i * bw + 4, w = Math.max(4, bw - 8), h = ih * r.share;
+    hover(vbar(s, x, T + ih - h, w, h, C("--s1")), `${r.reason}: ${r.minutes} min, ${r.stops} stops (${pct(r.share)})`);
+    pts.push([x + w / 2, T + ih * (1 - r.cumulative)]);
+    if (rotate) {
+      const cx = x + w / 2, cy = H - B + 12;
+      text(s, cx, cy, r.reason, {"text-anchor": "end", "font-size": 10.5, transform: `rotate(-35 ${cx} ${cy})`});
+    } else {
+      const words = r.reason.split(" "), mid = Math.ceil(words.length / 2);
+      text(s, x + w / 2, H - B + 15, words.slice(0, mid).join(" "), {"text-anchor": "middle", "font-size": 10.5});
+      if (words.length > 1) text(s, x + w / 2, H - B + 28, words.slice(mid).join(" "), {"text-anchor": "middle", "font-size": 10.5});
+    }
+  });
+  el("polyline", {points: pts.map(p => p.join(",")).join(" "), fill: "none", stroke: C("--s2"), "stroke-width": 2}, s);
+  pts.forEach((p, i) => hover(el("circle", {cx: p[0], cy: p[1], r: 4.5, fill: C("--s2"), stroke: C("--surface"), "stroke-width": 2}, s), `Cumulative: ${pct(rows[i].cumulative)}`));
+  const k = Math.min(2, rows.length - 1);
+  text(s, pts[k][0] + 8, pts[k][1] - 8, `Top ${k + 1} = ${pct(rows[k].cumulative)}`, {fill: C("--ink"), "font-size": 11.5, "font-weight": 600});
+}
+
+function drawTrend(rows) {
+  const s = reset("c-trend"), W = s.clientWidth, H = 200;
+  rows = rows.filter(r => r.oee != null);
+  if (!rows.length) return empty(s);
+  const L = 42, R = 56, T = 10, B = 26, ih = H - T - B, iw = W - L - R;
+  const lo = Math.min(0.6, Math.floor(Math.min(...rows.map(r => r.oee)) * 10) / 10), hi = 1;
+  const y = v => T + ih * (1 - (v - lo) / (hi - lo));
+  for (let v = lo; v <= hi + 1e-9; v += 0.1) { el("line", {x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: C("--grid")}, s); text(s, L - 6, y(v) + 4, Math.round(v * 100) + "%", {"text-anchor": "end", fill: C("--mut"), "font-size": 11}); }
+  el("line", {x1: L, x2: W - R, y1: y(0.85), y2: y(0.85), stroke: C("--mut"), "stroke-dasharray": "5 4"}, s);
+  text(s, L + 6, y(0.85) - 6, "Target 85%", {"font-size": 11});
+  const xs = i => rows.length === 1 ? L + iw / 2 : L + iw * i / (rows.length - 1);
+  el("polyline", {points: rows.map((r, i) => xs(i) + "," + y(r.oee)).join(" "), fill: "none", stroke: C("--s1"), "stroke-width": 2}, s);
+  const step = Math.ceil(rows.length / 10);
+  rows.forEach((r, i) => {
+    hover(el("circle", {cx: xs(i), cy: y(r.oee), r: 4.5, fill: C("--s1"), stroke: C("--surface"), "stroke-width": 2}, s), `${r.date}: OEE ${pct(r.oee)}`);
+    if (i % step === 0 || i === rows.length - 1) text(s, xs(i), H - 6, new Date(r.date + "T12:00:00").toLocaleDateString("en-CA", {month: "short", day: "numeric"}), {"text-anchor": "middle", "font-size": 11, fill: C("--mut")});
+  });
+  const last = rows[rows.length - 1];
+  text(s, xs(rows.length - 1) + 8, y(last.oee) + 4, pct(last.oee), {"font-size": 11.5, fill: C("--ink"), "font-weight": 600});
+}
+
+function drawShift(rows) {
+  const s = reset("c-shift"), W = s.clientWidth, H = 200;
+  if (!rows.some(r => r.minutes > 0)) return empty(s);
+  const L = 8, R = 8, T = 18, B = 26, ih = H - T - B, iw = W - L - R, bw = iw / rows.length, max = niceMax(Math.max(...rows.map(r => r.minutes)));
+  el("line", {x1: L, x2: W - R, y1: T + ih, y2: T + ih, stroke: C("--base")}, s);
+  rows.forEach((r, i) => {
+    const x = L + i * bw + bw * 0.22, w = bw * 0.56, h = Math.max(2, ih * r.minutes / max);
+    hover(vbar(s, x, T + ih - h, w, h, C("--s1")), `${r.shift} shift: ${num(r.minutes)} min`);
+    text(s, x + w / 2, T + ih - h - 6, num(r.minutes) + " min", {"text-anchor": "middle", fill: C("--ink"), "font-size": 11.5});
+    text(s, x + w / 2, H - 6, r.shift, {"text-anchor": "middle", "font-size": 12});
+  });
+}
+
+function drawStatus(rows) {
+  const icons = {RUNNING: "✓", FAULTED: "✕", STARVED: "◐", BLOCKED: "◐", STOPPED: "■"};
+  document.getElementById("status").innerHTML = rows.map(r => `<tr>
+    <td><b>${r.station_id}</b></td><td>${r.station_name}</td>
+    <td>${r.state ? `<span class="pill ${r.state}">${icons[r.state] || ""} ${r.state[0] + r.state.slice(1).toLowerCase()}</span>` : "–"}</td>
+    <td>${r.fault_description || ""}</td><td class="num">${r.minutes_in_state == null ? "" : r.minutes_in_state.toFixed(1)}</td></tr>`).join("");
+}
+
+function drawFeed(rows) {
+  document.getElementById("feed").innerHTML = rows.map(e => {
+    const p = e.payload, label = e.event_type === "CYCLE" ? "CYCLE" : p.state;
+    const detail = e.event_type === "CYCLE" ? `${Number(p.cycle_time_s).toFixed(1)} s · ${String(p.result).toLowerCase()}`
+      : p.fault_code ? `${p.fault_code} ${e.fault_description || ""}` : (p.state === "RUNNING" ? "running" : "waiting on neighbour station");
+    return `<li><span class="t">${timeOf(e.event_ts)}</span><span class="st">${e.station_id}</span><span class="tag ${label}">${label}</span><span>${detail}</span></li>`;
+  }).join("");
+}
+
+let lastData = null;
+async function load() {
+  const q = new URLSearchParams({days: days.value});
+  if (shift.value) q.set("shift", shift.value);
+  if (station.value) q.set("station", station.value);
+  try {
+    const res = await fetch("/api/dashboard?" + q);
+    if (!res.ok) throw new Error(res.status);
+    lastData = await res.json();
+    render(lastData);
+  } catch (err) {
+    document.getElementById("updated").textContent = "could not reach the server, retrying…";
+  }
+}
+
+function render(d) {
+  const k = d.kpi;
+  document.getElementById("k-oee").textContent = pct(k.oee);
+  document.getElementById("k-av").textContent = pct(k.availability);
+  document.getElementById("k-pf").textContent = pct(k.performance);
+  document.getElementById("k-q").textContent = pct(k.quality);
+  document.getElementById("k-dt").textContent = hm(k.downtime_min);
+  document.getElementById("k-dt-d").textContent = `${num(k.stop_events)} fault stops`;
+  document.getElementById("k-en").textContent = num(k.engines);
+  document.getElementById("k-en-d").textContent = `${num(k.scrap)} scrap parts`;
+  const badge = document.getElementById("liveBadge");
+  badge.className = "badge " + (d.live ? "live" : "off");
+  badge.lastElementChild.textContent = d.live ? "LIVE" : "Paused";
+  document.getElementById("updated").textContent = "last update " + timeOf(d.generated_at)
+    + (d.last_event_at ? " · latest machine event " + timeOf(d.last_event_at) : "");
+  drawStation(d.by_station);
+  drawPareto(d.pareto);
+  drawTrend(d.trend);
+  drawShift(d.shift);
+  drawStatus(d.status);
+  drawFeed(d.events);
+}
+
+const days = document.getElementById("days"), shift = document.getElementById("shift"), station = document.getElementById("station");
+const params = new URLSearchParams(location.search);
+if (params.get("days")) days.value = params.get("days");
+[days, shift, station].forEach(s => s.addEventListener("change", load));
+window.addEventListener("resize", () => lastData && render(lastData));
+
+const themeBtn = document.getElementById("themeBtn");
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  themeBtn.textContent = t === "dark" ? "☀ Light" : "☾ Dark";
+  if (lastData) render(lastData);
+}
+let savedTheme = "dark";
+try { savedTheme = localStorage.getItem("line3-theme") || "dark"; } catch (e) {}
+themeBtn.addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  try { localStorage.setItem("line3-theme", next); } catch (e) {}
+  applyTheme(next);
+});
+applyTheme(savedTheme);
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

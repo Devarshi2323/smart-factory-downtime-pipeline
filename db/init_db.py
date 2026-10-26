@@ -10,6 +10,9 @@ SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 
 def get_connection_string() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url
     return (
         f"host={os.getenv('DB_HOST', 'localhost')} "
         f"port={os.getenv('DB_PORT', '5432')} "
