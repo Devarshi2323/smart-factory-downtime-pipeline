@@ -1,5 +1,7 @@
 # Smart Factory Downtime & OEE Pipeline
 
+**Live dashboard:** https://line3-dashboard.up.railway.app
+
 An end-to-end Industrial IoT (IIoT) data pipeline for a simulated 5-station engine assembly line.
 Machine events travel over **MQTT**, are validated and stored in **PostgreSQL**, and are turned into
 **OEE, downtime and root-cause analysis** in a **Power BI** dashboard.
